@@ -5,8 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 // --- 配置 ---
 const MAP_SIZE = 64; 
 const TICK_RATE = 500;
-const VIEW_RADIUS = 8;
-const LOCAL_SAVE_KEY = "GNOMORIA_ZERO_SAVE_V4"; // 升级存档
+const LOCAL_SAVE_KEY = "GNOMORIA_ZERO_SAVE_V5"; // 存档升级
 const ID_KEY = "GNOMORIA_USER_ID"; 
 
 // --- 建筑菜单 ---
@@ -20,27 +19,34 @@ const BUILD_MENU = {
   TORCH:      { wood: 2, stone: 0, label: "🔥 火把 (Torch)" },
 };
 
-// --- 颜色映射 ---
-const getTileColor = (tile, isVisible, isExplored, timeOfDay) => {
-  if (!isExplored) return 'text-transparent';
-  let color = 'text-zinc-700';
+// --- 颜色映射 (升级光照版) ---
+const getTileColor = (tile, lightingLevel) => {
+  let color = 'text-gray-600';
   
   switch (tile.type) {
     case 'WALL':   color = 'text-zinc-600'; break;
     case 'TREE':   color = 'text-emerald-700'; break;
     case 'BUSH':   color = 'text-rose-700'; break;
     case 'WATER':  color = 'text-blue-800'; break;
-    case 'EMPTY':  color = 'text-zinc-900'; break;
+    case 'EMPTY':  color = 'text-zinc-800'; break;
     case 'FARM':   color = tile.growth >= 100 ? 'text-green-600' : 'text-amber-900'; break;
     case 'BED':    color = 'text-yellow-200'; break;
     case 'TORCH':  color = 'text-orange-500'; break;
   }
 
-  const isNight = timeOfDay > 19 || timeOfDay < 5;
-  let opacity = isVisible ? 'opacity-100' : 'opacity-30';
-  if (isVisible && isNight && tile.type !== 'TORCH') opacity = 'opacity-60'; 
+  // 根据光照等级调整透明度
+  // lightingLevel: 0 (全黑) -> 1 (全亮)
+  // 为了美观，最低亮度设为 0.15 (可见地形轮廓)
+  let opacityClass = 'opacity-20'; 
+  if (lightingLevel >= 0.9) opacityClass = 'opacity-100';
+  else if (lightingLevel >= 0.5) opacityClass = 'opacity-60';
+  else if (lightingLevel >= 0.2) opacityClass = 'opacity-30';
+  else opacityClass = 'opacity-15'; // 极暗，但可见
 
-  return `${color} ${opacity}`;
+  // 火把始终高亮
+  if (tile.type === 'TORCH') return `${color} opacity-100 animate-pulse`;
+
+  return `${color} ${opacityClass}`;
 };
 
 export default function GnomoriaGame() {
@@ -48,7 +54,6 @@ export default function GnomoriaGame() {
   const [gnomes, setGnomes] = useState([]);
   const [resources, setResources] = useState({ wood: 0, stone: 0, food: 20 });
   const [logs, setLogs] = useState([]);
-  const [exploredTiles, setExploredTiles] = useState(new Set());
   const [selectedTool, setSelectedTool] = useState('DIG');
   const [isLoaded, setIsLoaded] = useState(false);
   const [gameTime, setGameTime] = useState({ day: 1, hour: 6 });
@@ -56,14 +61,14 @@ export default function GnomoriaGame() {
   const [inputUserId, setInputUserId] = useState(""); 
   const [syncStatus, setSyncStatus] = useState(""); 
   
-  // 新增：高亮定位的矮人ID
+  // 高亮定位
   const [highlightGnomeId, setHighlightGnomeId] = useState(null);
 
-  const stateRef = useRef({ mapGrid, gnomes, resources, exploredTiles, gameTime });
+  const stateRef = useRef({ mapGrid, gnomes, resources, gameTime });
 
   useEffect(() => {
-    stateRef.current = { mapGrid, gnomes, resources, exploredTiles, gameTime };
-  }, [mapGrid, gnomes, resources, exploredTiles, gameTime]);
+    stateRef.current = { mapGrid, gnomes, resources, gameTime };
+  }, [mapGrid, gnomes, resources, gameTime]);
 
   // --- 游戏循环 ---
   useEffect(() => {
@@ -75,6 +80,7 @@ export default function GnomoriaGame() {
         if (newHour >= 24) { newHour = 0; newDay += 1; addLog(`🌞 第 ${newDay} 天开始了。`); }
         return { day: newDay, hour: newHour };
       });
+      // 农作物生长
       setMapGrid(prevGrid => prevGrid.map(row => row.map(tile => {
         if (tile.type === 'FARM' && tile.growth < 100) {
             if (stateRef.current.gameTime.hour > 6 && stateRef.current.gameTime.hour < 18) {
@@ -90,18 +96,16 @@ export default function GnomoriaGame() {
   useEffect(() => {
     if (!isLoaded) return;
     const interval = setInterval(() => {
-      const { mapGrid: currentMap, gnomes: currentGnomes, exploredTiles: currentExplored, gameTime } = stateRef.current;
+      const { mapGrid: currentMap, gnomes: currentGnomes, gameTime } = stateRef.current;
       if (currentMap.length === 0) return;
 
       const nextMap = currentMap.map(row => [...row]);
       const nextGnomes = currentGnomes.map(g => ({ ...g }));
-      const nextExplored = new Set(currentExplored);
       let mapChanged = false;
 
       nextGnomes.forEach(gnome => {
         gnome.hunger += 0.4; 
         gnome.energy -= 0.2; 
-        updateVision(gnome, nextExplored);
 
         // 1. 睡觉
         if (gnome.energy < 10 || (gameTime.hour >= 22 && gnome.energy < 80)) {
@@ -115,7 +119,6 @@ export default function GnomoriaGame() {
                 if (bed) moveTo(gnome, bed, nextMap);
                 else {
                     gnome.energy = Math.min(100, gnome.energy + 2);
-                    // 偶尔显示日志，不刷屏
                     if (Math.random() > 0.98) addLog(`${gnome.name} 睡在地上...`);
                 }
             }
@@ -174,21 +177,13 @@ export default function GnomoriaGame() {
             } else moveTo(gnome, gnome.target, nextMap);
         }
       });
-      setGnomes(nextGnomes); setExploredTiles(nextExplored);
+      setGnomes(nextGnomes);
       if (mapChanged) setMapGrid(nextMap);
     }, TICK_RATE);
     return () => clearInterval(interval);
   }, [isLoaded]);
 
   // --- 辅助算法 ---
-  const updateVision = (gnome, exploredSet) => {
-      for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) 
-          for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) 
-              if (Math.abs(dx) + Math.abs(dy) <= VIEW_RADIUS) {
-                  const tx = gnome.x + dx, ty = gnome.y + dy;
-                  if (tx >= 0 && ty >= 0 && tx < MAP_SIZE && ty < MAP_SIZE) exploredSet.add(`${tx},${ty}`);
-              }
-  };
   const isNextTo = (g, target) => Math.abs(g.x - target.x) + Math.abs(g.y - target.y) <= 1;
   const moveTo = (gnome, target, map) => {
       const nextStep = findPathNextStep({x: gnome.x, y: gnome.y}, target, map);
@@ -196,7 +191,7 @@ export default function GnomoriaGame() {
   };
   const findNearestBlock = (map, px, py, type) => {
     let nearest = null; let minDist = Infinity;
-    const range = 30;
+    const range = 40;
     const minX = Math.max(0, px - range), maxX = Math.min(MAP_SIZE, px + range);
     const minY = Math.max(0, py - range), maxY = Math.min(MAP_SIZE, py + range);
     for(let y=minY; y<maxY; y++) for(let x=minX; x<maxX; x++) {
@@ -269,9 +264,8 @@ export default function GnomoriaGame() {
             setGnomes(parsed.gnomes);
             setResources(parsed.resources);
             setGameTime(parsed.gameTime || { day: 1, hour: 6 });
-            setExploredTiles(new Set(parsed.exploredTiles));
             setIsLoaded(true);
-            setLogs(["职业系统更新完毕。", ...parsed.logs]);
+            setLogs(["上帝视角开启。地图全开。", ...parsed.logs]);
             return;
         }
       } catch (e) { console.error(e); }
@@ -297,26 +291,22 @@ export default function GnomoriaGame() {
 
     setMapGrid(newMap);
     setGnomes([
-        // 这里定义职业代号：symbol
         { id: 1, name: "G.Miner", symbol: "M", color: "text-red-500", x: mid, y: mid, hunger: 0, energy: 100, job: 'IDLE', target: null },
         { id: 2, name: "G.Farmer", symbol: "F", color: "text-green-500", x: mid-1, y: mid, hunger: 10, energy: 100, job: 'IDLE', target: null }
     ]);
     setResources({ wood: 20, stone: 0, food: 50 });
-    const initialExplored = new Set();
-    for(let dy=-VIEW_RADIUS; dy<=VIEW_RADIUS; dy++) for(let dx=-VIEW_RADIUS; dx<=VIEW_RADIUS; dx++) initialExplored.add(`${mid+dx},${mid+dy}`);
-    setExploredTiles(initialExplored);
-    setLogs(["新世界生成。使用右侧列表定位矮人。"]);
+    setLogs(["宏大世界已加载 (无迷雾版)。"]);
     setIsLoaded(true);
   };
 
   useEffect(() => {
     if (!isLoaded || mapGrid.length === 0) return;
-    const saveData = { mapGrid, gnomes, resources, logs: logs.slice(0, 15), exploredTiles: Array.from(exploredTiles), gameTime };
+    const saveData = { mapGrid, gnomes, resources, logs: logs.slice(0, 15), gameTime };
     localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(saveData));
-  }, [mapGrid, gnomes, resources, exploredTiles, logs, gameTime, isLoaded]);
+  }, [mapGrid, gnomes, resources, logs, gameTime, isLoaded]);
 
   const handleTileClick = (x, y) => {
-    if (!stateRef.current.exploredTiles.has(`${x},${y}`)) return;
+    // 移除 isExplored 检查，因为全图可见
     const newMap = [...mapGrid];
     const tile = newMap[y][x];
     const cost = BUILD_MENU[selectedTool];
@@ -359,7 +349,7 @@ export default function GnomoriaGame() {
 
   const handleCloudUpload = async () => {
       setSyncStatus("⏳");
-      const saveData = { mapGrid, gnomes, resources, logs, exploredTiles: Array.from(exploredTiles), gameTime };
+      const saveData = { mapGrid, gnomes, resources, logs, gameTime };
       try {
         const res = await fetch('/api/save', { method: 'POST', body: JSON.stringify({ saveId: userId, data: saveData }) });
         if(res.ok) setSyncStatus("✅"); else setSyncStatus("❌");
@@ -373,29 +363,70 @@ export default function GnomoriaGame() {
           const json = await res.json();
           if(res.ok && json.data) {
               setMapGrid(json.data.mapGrid); setGnomes(json.data.gnomes); setResources(json.data.resources);
-              setGameTime(json.data.gameTime); setExploredTiles(new Set(json.data.exploredTiles));
+              setGameTime(json.data.gameTime);
               setSyncStatus("✅");
           } else setSyncStatus("❌");
       } catch(e) { setSyncStatus("❌"); }
       setTimeout(()=>setSyncStatus(""), 3000);
   };
   const addLog = (msg) => setLogs(prev => [`[${Math.floor(stateRef.current.gameTime.hour)}:00] ${msg}`, ...prev].slice(0, 8));
-  const handleReset = () => { if(confirm("重置世界?")) { localStorage.removeItem(LOCAL_SAVE_KEY); window.location.reload(); }};
+  const handleReset = () => { if(confirm("完全重置世界?")) { localStorage.removeItem(LOCAL_SAVE_KEY); window.location.reload(); }};
 
-  // 渲染时视野
-  const visibleSet = new Set();
-  gnomes.forEach(g => {
-      for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++)
-          if (Math.abs(dx) + Math.abs(dy) <= VIEW_RADIUS) visibleSet.add(`${g.x + dx},${g.y + dy}`);
-  });
+  // --- 光照计算系统 ---
+  const calculateLighting = () => {
+      // 基础环境光：白天 1.0，夜晚 0.2
+      const time = gameTime.hour;
+      let ambientLight = 0.2; // 默认夜晚亮度
+      
+      // 白天 (6点到18点) 光照渐变
+      if (time >= 6 && time <= 18) {
+          ambientLight = 1.0; 
+      } else if (time > 5 && time < 6) {
+          ambientLight = 0.5; // 黎明
+      } else if (time > 18 && time < 19) {
+          ambientLight = 0.5; // 黄昏
+      }
+
+      // 如果是白天，全图亮，直接返回简单判断
+      if (ambientLight === 1.0) return null; // null 表示全亮
+
+      // 夜晚：计算光源 (火把 + 矮人)
+      // 使用 Set 存储高亮坐标 "x,y"
+      const lightMap = new Set();
+      const lightSources = [];
+
+      // 1. 矮人自带小范围光环 (半径 4)
+      gnomes.forEach(g => lightSources.push({ x: g.x, y: g.y, radius: 4 }));
+
+      // 2. 地图上的火把 (半径 6)
+      for(let y=0; y<MAP_SIZE; y++) for(let x=0; x<MAP_SIZE; x++) {
+          if (mapGrid[y] && mapGrid[y][x].type === 'TORCH') {
+              lightSources.push({ x, y, radius: 6 });
+          }
+      }
+
+      // 合并光源
+      lightSources.forEach(source => {
+          for (let dy = -source.radius; dy <= source.radius; dy++) {
+              for (let dx = -source.radius; dx <= source.radius; dx++) {
+                  if (Math.abs(dx) + Math.abs(dy) <= source.radius) {
+                      lightMap.add(`${source.x + dx},${source.y + dy}`);
+                  }
+              }
+          }
+      });
+
+      return { ambientLight, lightMap };
+  };
+
+  const lightingData = calculateLighting();
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 text-zinc-300 p-2 font-mono select-none">
-      
       <div className="w-full max-w-7xl bg-zinc-900 border border-zinc-800 p-3 mb-2 flex justify-between items-center shadow-2xl rounded">
         <div>
            <h1 className="text-lg font-bold text-amber-500 tracking-widest flex items-center gap-2">
-             GNOMORIA // ZERO v0.14
+             GNOMORIA // GOD_EYE v0.15
              <span className="text-xs text-zinc-500">Day {gameTime.day} {Math.floor(gameTime.hour)}:00</span>
            </h1>
            <div className="flex gap-2 mt-1 items-center text-[10px] text-zinc-500">
@@ -414,36 +445,30 @@ export default function GnomoriaGame() {
       </div>
 
       <div className="flex gap-2 w-full max-w-7xl h-[85vh]">
-        {/* 地图区域 */}
         <div className="flex-1 border border-zinc-800 bg-black p-1 overflow-hidden relative flex items-center justify-center">
           <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${MAP_SIZE}, 1fr)` }}>
             {mapGrid.map((row, y) => row.map((tile, x) => {
                const key = `${x},${y}`;
-               
-               // --- 渲染逻辑升级：寻找所有在此处的矮人 ---
                const gnomesHere = gnomes.filter(g => g.x === x && g.y === y);
                const count = gnomesHere.length;
                
-               // 决定显示什么字符
-               let content = tile.content;
-               let styleClass = getTileColor(tile, visibleSet.has(key), exploredTiles.has(key), gameTime.hour);
+               // 光照计算
+               let lightingLevel = 1.0; // 默认全亮
+               if (lightingData) { // 如果是晚上，应用光照逻辑
+                   lightingLevel = lightingData.lightMap.has(key) ? 1.0 : lightingData.ambientLight;
+               }
 
-               // 如果有人
+               let content = tile.content;
+               let styleClass = getTileColor(tile, lightingLevel);
+
                if (count > 0) {
-                   if (count > 1) {
-                       // 堆叠显示
-                       content = '+'; 
-                       styleClass = 'text-white font-bold animate-pulse';
-                   } else {
-                       // 单人显示职业
+                   if (count > 1) { content = '+'; styleClass = 'text-white font-bold animate-pulse'; } 
+                   else {
                        const g = gnomesHere[0];
                        content = g.job === 'SLEEPING' ? 'z' : (g.symbol || '@');
                        styleClass = g.job === 'SLEEPING' ? 'text-blue-400' : (g.color || 'text-red-500');
-                       // 高亮效果
                        if (g.id === highlightGnomeId) styleClass += ' bg-white/30 border border-white';
                    }
-               } else if (!exploredTiles.has(key)) {
-                   content = ' ';
                }
 
                return (
@@ -457,7 +482,6 @@ export default function GnomoriaGame() {
         </div>
 
         <div className="flex flex-col gap-2 w-56 h-full">
-            {/* 建筑菜单 */}
             <div className="bg-zinc-900 border border-zinc-800 p-2 flex-1 flex flex-col overflow-hidden">
                  <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Build</h3>
                  <div className="flex flex-col gap-1 overflow-y-auto flex-1">
@@ -470,22 +494,12 @@ export default function GnomoriaGame() {
                     ))}
                  </div>
             </div>
-
-            {/* 小队列表 (点击定位功能) */}
             <div className="bg-zinc-900 border border-zinc-800 p-2 h-40 flex flex-col">
-                <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Squad (Click to Find)</h3>
+                <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Squad</h3>
                 <div className="flex-1 overflow-y-auto text-[10px] space-y-2">
                     {gnomes.map(g => (
-                        <div 
-                            key={g.id} 
-                            onClick={() => {
-                                // 点击切换高亮
-                                setHighlightGnomeId(prev => prev === g.id ? null : g.id);
-                            }}
-                            className={`flex justify-between items-center cursor-pointer p-1 rounded hover:bg-zinc-800 transition-colors
-                            ${highlightGnomeId === g.id ? 'bg-zinc-800 border border-zinc-600' : ''}`}
-                        >
-                            {/* 显示职业符号和颜色 */}
+                        <div key={g.id} onClick={() => setHighlightGnomeId(prev => prev === g.id ? null : g.id)}
+                            className={`flex justify-between items-center cursor-pointer p-1 rounded hover:bg-zinc-800 ${highlightGnomeId === g.id ? 'bg-zinc-800 border border-zinc-600' : ''}`}>
                             <span className={g.color}>{g.symbol} {g.name}</span>
                             <div className="flex flex-col w-12 gap-0.5">
                                 <div className="h-0.5 bg-zinc-700"><div className="h-0.5 bg-orange-500" style={{width:`${g.hunger}%`}}></div></div>
@@ -495,7 +509,6 @@ export default function GnomoriaGame() {
                     ))}
                 </div>
             </div>
-
             <div className="bg-zinc-900 border border-zinc-800 p-2 h-32 flex flex-col">
                 <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Log</h3>
                 <ul className="space-y-0.5 text-[10px] overflow-hidden">
