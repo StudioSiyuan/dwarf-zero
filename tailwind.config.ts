@@ -1,5 +1,6 @@
-/** @type {import('tailwindcss').Config} */
-module.exports = {
+import type { Config } from "tailwindcss";
+
+const config: Config = {
   content: [
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -12,13 +13,13 @@ module.exports = {
       },
       colors: {
         game: {
-          bg: '#0a0a0a',        // 关键：这就是报错找不到的颜色
+          bg: '#0a0a0a',
           panel: '#171717',
           border: '#262626',
-          text: { 
-            main: '#e5e5e5', 
-            dim: '#737373', 
-            highlight: '#ffffff' 
+          text: {
+            main: '#e5e5e5',
+            dim: '#737373',
+            highlight: '#ffffff'
           }
         },
         tile: {
@@ -34,3 +35,4 @@ module.exports = {
   },
   plugins: [],
 };
+export default config;
