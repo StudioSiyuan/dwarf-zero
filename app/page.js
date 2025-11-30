@@ -2,21 +2,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid'; 
 
-// --- 宽屏版配置 ---
-const MAP_SIZE = 32; // 地图变大！
+// --- 宏大世界配置 ---
+const MAP_SIZE = 64; // 64x64 = 4096 个格子！
 const TICK_RATE = 500;
-const VIEW_RADIUS = 6;
-const LOCAL_SAVE_KEY = "GNOMORIA_ZERO_SAVE_V2"; // 升级存档版本以防冲突
+const VIEW_RADIUS = 8; // 视野扩大
+const LOCAL_SAVE_KEY = "GNOMORIA_ZERO_SAVE_V3"; // 升级存档版本
 const ID_KEY = "GNOMORIA_USER_ID"; 
 
 // --- 资源与建筑 ---
 const BUILD_MENU = {
-  DIG:        { wood: 0, stone: 0, label: "⛏️ 挖掘墙壁 (Mine)" },
-  FORAGE:     { wood: 0, stone: 0, label: "🍓 采集草莓 (Forage)" },
-  FARM_PLOT:  { wood: 0, stone: 0, label: "🌱 开垦农田 (Farm)" },
-  WALL:       { wood: 0, stone: 1, label: "🧱 石墙 (Stone Wall)" },
-  PLANK_WALL: { wood: 2, stone: 0, label: "🪵 木墙 (Plank Wall)" },
-  BED:        { wood: 5, stone: 0, label: "🛏️ 草床 (Straw Bed)" },
+  DIG:        { wood: 0, stone: 0, label: "⛏️ 挖掘 (Mine)" },
+  FORAGE:     { wood: 0, stone: 0, label: "🍓 采集 (Forage)" },
+  FARM_PLOT:  { wood: 0, stone: 0, label: "🌱 农田 (Farm)" },
+  WALL:       { wood: 0, stone: 1, label: "🧱 石墙 (Wall)" },
+  PLANK_WALL: { wood: 2, stone: 0, label: "🪵 木墙 (Plank)" },
+  BED:        { wood: 5, stone: 0, label: "🛏️ 草床 (Bed)" },
   TORCH:      { wood: 2, stone: 0, label: "🔥 火把 (Torch)" },
 };
 
@@ -27,23 +27,22 @@ const getTileColor = (tile, isVisible, isExplored, timeOfDay) => {
   let color = 'text-gray-600';
   
   switch (tile.type) {
-    case 'WALL':   color = 'text-zinc-600'; break;
-    case 'TREE':   color = 'text-emerald-500'; break;
-    case 'BUSH':   color = 'text-red-400'; break;
-    case 'WATER':  color = 'text-blue-500'; break;
-    case 'EMPTY':  color = 'text-stone-800'; break;
+    case 'WALL':   color = 'text-zinc-700'; break;
+    case 'TREE':   color = 'text-emerald-600'; break;
+    case 'BUSH':   color = 'text-rose-500'; break;
+    case 'WATER':  color = 'text-blue-600'; break;
+    case 'EMPTY':  color = 'text-stone-900'; break;
     case 'FARM':   
-      color = tile.growth >= 100 ? 'text-green-400' : 'text-amber-900'; 
+      color = tile.growth >= 100 ? 'text-green-500' : 'text-amber-900'; 
       break;
-    case 'BED':    color = 'text-yellow-200'; break;
+    case 'BED':    color = 'text-yellow-300'; break;
     case 'TORCH':  color = 'text-orange-500'; break;
   }
 
   const isNight = timeOfDay > 19 || timeOfDay < 5;
-  // 晚上视野变暗，但火把常亮
-  let opacity = isVisible ? 'opacity-100' : 'opacity-10';
+  let opacity = isVisible ? 'opacity-100' : 'opacity-20'; // 迷雾更深，突出当前视野
   if (isVisible && isNight && tile.type !== 'TORCH') {
-      opacity = 'opacity-50'; 
+      opacity = 'opacity-60'; 
   }
 
   return `${color} ${opacity}`;
@@ -68,7 +67,7 @@ export default function GnomoriaGame() {
     stateRef.current = { mapGrid, gnomes, resources, exploredTiles, gameTime };
   }, [mapGrid, gnomes, resources, exploredTiles, gameTime]);
 
-  // --- 游戏逻辑 ---
+  // --- 游戏循环 ---
   useEffect(() => {
     if (!isLoaded) return;
     const timer = setInterval(() => {
@@ -78,6 +77,7 @@ export default function GnomoriaGame() {
         if (newHour >= 24) { newHour = 0; newDay += 1; addLog(`🌞 第 ${newDay} 天开始了。`); }
         return { day: newDay, hour: newHour };
       });
+      // 农作物生长
       setMapGrid(prevGrid => prevGrid.map(row => row.map(tile => {
         if (tile.type === 'FARM' && tile.growth < 100) {
             if (stateRef.current.gameTime.hour > 6 && stateRef.current.gameTime.hour < 18) {
@@ -106,7 +106,7 @@ export default function GnomoriaGame() {
         gnome.energy -= 0.2; 
         updateVision(gnome, nextExplored);
 
-        // 1. 睡觉
+        // 1. 睡觉逻辑
         if (gnome.energy < 10 || (gameTime.hour >= 22 && gnome.energy < 80)) {
             gnome.job = 'SLEEPING';
             const tile = nextMap[gnome.y][gnome.x];
@@ -118,19 +118,19 @@ export default function GnomoriaGame() {
                 if (bed) moveTo(gnome, bed, nextMap);
                 else {
                     gnome.energy = Math.min(100, gnome.energy + 2);
-                    if (Math.random() > 0.95) addLog(`${gnome.name} 睡在地板上...`);
+                    if (Math.random() > 0.98) addLog(`${gnome.name} 困倒在地...`);
                 }
             }
             return;
         }
 
-        // 2. 吃饭
+        // 2. 吃饭逻辑
         if (gnome.hunger > 80) {
             gnome.job = 'EATING';
             if (stateRef.current.resources.food > 0) {
                 setResources(prev => ({ ...prev, food: prev.food - 1 }));
                 gnome.hunger = 0; gnome.job = 'IDLE';
-                addLog(`${gnome.name} 吃得很饱。`);
+                addLog(`${gnome.name} 吃饱了。`);
             } else {
                 const foodSource = findNearestFood(nextMap, gnome.x, gnome.y);
                 if (foodSource) {
@@ -139,12 +139,14 @@ export default function GnomoriaGame() {
                         mapChanged = true; gnome.hunger = 0;
                         addLog(`${gnome.name} 吃了野果。`);
                     } else moveTo(gnome, foodSource, nextMap);
-                } else addLog(`警告: ${gnome.name} 非常饿！`);
+                } else {
+                    if (Math.random() > 0.9) addLog(`警告: ${gnome.name} 正在挨饿！`);
+                }
             }
             return;
         }
 
-        // 3. 工作
+        // 3. 工作逻辑
         if (!gnome.target) {
             const matureCrop = findMatureCrop(nextMap, gnome.x, gnome.y);
             if (matureCrop) { gnome.target = matureCrop; gnome.job = 'FARMING'; } 
@@ -180,7 +182,7 @@ export default function GnomoriaGame() {
     return () => clearInterval(interval);
   }, [isLoaded]);
 
-  // --- 辅助算法 ---
+  // --- 辅助算法 (升级版：支持长距离寻路) ---
   const updateVision = (gnome, exploredSet) => {
       for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) 
           for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) 
@@ -196,12 +198,19 @@ export default function GnomoriaGame() {
   };
   const findNearestBlock = (map, px, py, type) => {
     let nearest = null; let minDist = Infinity;
-    map.forEach((row, y) => row.forEach((tile, x) => {
-      if (tile.type === type) {
-        const dist = Math.abs(px - x) + Math.abs(py - y);
-        if (dist < minDist) { minDist = dist; nearest = { x, y }; }
-      }
-    }));
+    // 性能优化：不遍历全图，只遍历周围 30 格
+    const range = 30;
+    const minX = Math.max(0, px - range), maxX = Math.min(MAP_SIZE, px + range);
+    const minY = Math.max(0, py - range), maxY = Math.min(MAP_SIZE, py + range);
+
+    for(let y=minY; y<maxY; y++) {
+        for(let x=minX; x<maxX; x++) {
+            if (map[y][x].type === type) {
+                const dist = Math.abs(px - x) + Math.abs(py - y);
+                if (dist < minDist) { minDist = dist; nearest = { x, y }; }
+            }
+        }
+    }
     return nearest;
   };
   const findMatureCrop = (map, px, py) => {
@@ -216,12 +225,19 @@ export default function GnomoriaGame() {
   };
   const findNearestFood = (map, px, py) => {
       let nearest = null; let minDist = Infinity;
-      map.forEach((row, y) => row.forEach((tile, x) => {
-        if (tile.type === 'BUSH' || (tile.type === 'FARM' && tile.growth >= 100)) {
-          const dist = Math.abs(px - x) + Math.abs(py - y);
-          if (dist < minDist) { minDist = dist; nearest = { x, y }; }
+      // 范围搜索优化
+      const range = 40;
+      const minX = Math.max(0, px - range), maxX = Math.min(MAP_SIZE, px + range);
+      const minY = Math.max(0, py - range), maxY = Math.min(MAP_SIZE, py + range);
+      for(let y=minY; y<maxY; y++) {
+        for(let x=minX; x<maxX; x++) {
+            const tile = map[y][x];
+            if (tile.type === 'BUSH' || (tile.type === 'FARM' && tile.growth >= 100)) {
+                const dist = Math.abs(px - x) + Math.abs(py - y);
+                if (dist < minDist) { minDist = dist; nearest = { x, y }; }
+            }
         }
-      }));
+      }
       return nearest;
   };
   const findPathNextStep = (start, end, map) => {
@@ -231,7 +247,7 @@ export default function GnomoriaGame() {
     while (queue.length > 0) {
       const { x, y, path } = queue.shift();
       if (Math.abs(x - end.x) + Math.abs(y - end.y) <= 1) return path[0] || null;
-      if (path.length > 20) continue; 
+      if (path.length > 80) continue; // 增加搜索深度以适应大地图
       for (let dir of directions) {
         const nx = x + dir.dx; const ny = y + dir.dy;
         if (nx < 0 || ny < 0 || nx >= MAP_SIZE || ny >= MAP_SIZE) continue;
@@ -257,7 +273,6 @@ export default function GnomoriaGame() {
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
-        // 如果旧存档地图太小，强制重置，否则直接读取
         if (parsed.mapGrid && parsed.mapGrid.length === MAP_SIZE) {
             setMapGrid(parsed.mapGrid);
             setGnomes(parsed.gnomes);
@@ -265,7 +280,7 @@ export default function GnomoriaGame() {
             setGameTime(parsed.gameTime || { day: 1, hour: 6 });
             setExploredTiles(new Set(parsed.exploredTiles));
             setIsLoaded(true);
-            setLogs(["宽屏版存档已加载。", ...parsed.logs]);
+            setLogs(["存档加载成功。", ...parsed.logs]);
             return;
         }
       } catch (e) { console.error(e); }
@@ -279,26 +294,28 @@ export default function GnomoriaGame() {
       const row = [];
       for (let x = 0; x < MAP_SIZE; x++) {
         const rand = Math.random();
-        if (rand > 0.94) row.push({ type: 'TREE', content: 'T' });
-        else if (rand > 0.92) row.push({ type: 'BUSH', content: '%' }); 
-        else if (rand > 0.82) row.push({ type: 'WALL', content: '#' });
+        // 调整资源密度适应大地图
+        if (rand > 0.96) row.push({ type: 'TREE', content: 'T' });
+        else if (rand > 0.94) row.push({ type: 'BUSH', content: '%' }); 
+        else if (rand > 0.85) row.push({ type: 'WALL', content: '#' });
         else row.push({ type: 'EMPTY', content: '·' });
       }
       newMap.push(row);
     }
+    // 出生点居中清理
     const mid = Math.floor(MAP_SIZE / 2);
-    for(let y=mid-2; y<mid+2; y++) for(let x=mid-2; x<mid+2; x++) newMap[y][x] = { type: 'EMPTY', content: '·' };
+    for(let y=mid-3; y<mid+3; y++) for(let x=mid-3; x<mid+3; x++) newMap[y][x] = { type: 'EMPTY', content: '·' };
 
     setMapGrid(newMap);
     setGnomes([
-        { id: 1, name: "Gnome.Miner", x: mid, y: mid, hunger: 0, energy: 100, job: 'IDLE', target: null },
-        { id: 2, name: "Gnome.Farmer", x: mid-1, y: mid, hunger: 10, energy: 100, job: 'IDLE', target: null }
+        { id: 1, name: "G.Miner", x: mid, y: mid, hunger: 0, energy: 100, job: 'IDLE', target: null },
+        { id: 2, name: "G.Farmer", x: mid-1, y: mid, hunger: 10, energy: 100, job: 'IDLE', target: null }
     ]);
-    setResources({ wood: 10, stone: 0, food: 30 });
+    setResources({ wood: 20, stone: 0, food: 50 });
     const initialExplored = new Set();
     for(let dy=-VIEW_RADIUS; dy<=VIEW_RADIUS; dy++) for(let dx=-VIEW_RADIUS; dx<=VIEW_RADIUS; dx++) initialExplored.add(`${mid+dx},${mid+dy}`);
     setExploredTiles(initialExplored);
-    setLogs(["新世界 (32x32) 已生成。"]);
+    setLogs(["宏大世界 (64x64) 已生成。", "提示：地图变大了，注意食物储备！"]);
     setIsLoaded(true);
   };
 
@@ -315,7 +332,7 @@ export default function GnomoriaGame() {
     const cost = BUILD_MENU[selectedTool];
     
     if (resources.wood < cost.wood || resources.stone < cost.stone) {
-        addLog(`缺材料: 木${cost.wood} 石${cost.stone}`); return;
+        addLog(`缺材料: W${cost.wood} S${cost.stone}`); return;
     }
 
     let actionSuccess = false;
@@ -350,7 +367,7 @@ export default function GnomoriaGame() {
     if (actionSuccess) setMapGrid(newMap);
   };
 
-  const handleCloudUpload = async () => {
+  const handleCloudUpload = async () => { /* ...保持不变... */ 
       setSyncStatus("⏳");
       const saveData = { mapGrid, gnomes, resources, logs, exploredTiles: Array.from(exploredTiles), gameTime };
       try {
@@ -373,8 +390,9 @@ export default function GnomoriaGame() {
       setTimeout(()=>setSyncStatus(""), 3000);
   };
   const addLog = (msg) => setLogs(prev => [`[${Math.floor(stateRef.current.gameTime.hour)}:00] ${msg}`, ...prev].slice(0, 8));
-  const handleReset = () => { if(confirm("完全重置世界?")) { localStorage.removeItem(LOCAL_SAVE_KEY); window.location.reload(); }};
+  const handleReset = () => { if(confirm("重置到 64x64 新世界?")) { localStorage.removeItem(LOCAL_SAVE_KEY); window.location.reload(); }};
 
+  // 渲染时视野计算
   const visibleSet = new Set();
   gnomes.forEach(g => {
       for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++)
@@ -382,35 +400,35 @@ export default function GnomoriaGame() {
   });
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 text-zinc-300 p-4 font-mono select-none">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 text-zinc-300 p-2 font-mono select-none">
       
       {/* 顶部宽屏 Header */}
-      <div className="w-full max-w-7xl bg-zinc-900 border border-zinc-800 p-4 mb-4 flex justify-between items-center shadow-2xl rounded">
+      <div className="w-full max-w-7xl bg-zinc-900 border border-zinc-800 p-3 mb-2 flex justify-between items-center shadow-2xl rounded">
         <div>
-           <h1 className="text-xl font-bold text-amber-500 tracking-widest flex items-center gap-2">
-             GNOMORIA // ZERO
+           <h1 className="text-lg font-bold text-amber-500 tracking-widest flex items-center gap-2">
+             GNOMORIA // MACRO
              <span className="text-xs text-zinc-500">Day {gameTime.day} {Math.floor(gameTime.hour)}:00</span>
            </h1>
-           <div className="flex gap-4 mt-2 items-center text-xs text-zinc-500">
-             ID: <input type="text" value={inputUserId} onChange={e=>setInputUserId(e.target.value)} className="bg-black border border-zinc-700 text-green-500 px-2 w-24 text-center"/>
+           <div className="flex gap-2 mt-1 items-center text-[10px] text-zinc-500">
+             ID:<input type="text" value={inputUserId} onChange={e=>setInputUserId(e.target.value)} className="bg-black border border-zinc-700 text-green-500 px-1 w-20 text-center"/>
              <button onClick={handleCloudUpload} className="hover:text-white">[UP]</button>
              <button onClick={handleCloudDownload} className="hover:text-white">[DL]</button>
              <span className="text-yellow-500">{syncStatus}</span>
-             <button onClick={handleReset} className="ml-4 text-red-500 hover:text-red-400">[RESET]</button>
+             <button onClick={handleReset} className="ml-2 text-red-500 hover:text-red-400">[RESET]</button>
            </div>
         </div>
-        <div className="flex gap-8 text-sm">
-          <div className="text-orange-400 font-bold">🍔 FOOD: {resources.food}</div>
-          <div className="text-emerald-400 font-bold">🪵 WOOD: {resources.wood}</div>
-          <div className="text-stone-400 font-bold">🪨 STONE: {resources.stone}</div>
+        <div className="flex gap-4 text-sm">
+          <div className="text-orange-400 font-bold">🍔:{resources.food}</div>
+          <div className="text-emerald-400 font-bold">🪵:{resources.wood}</div>
+          <div className="text-stone-400 font-bold">🪨:{resources.stone}</div>
         </div>
       </div>
 
-      {/* 宽屏游戏区：高度 80vh，宽度 7xl */}
-      <div className="flex gap-4 w-full max-w-7xl h-[80vh]">
-        {/* 地图：自适应填充 */}
-        <div className="flex-1 border border-zinc-800 bg-black p-4 overflow-hidden relative flex items-center justify-center">
-          <div className="grid gap-[1px]" style={{ gridTemplateColumns: `repeat(${MAP_SIZE}, 1fr)` }}>
+      {/* 宽屏游戏区：85vh */}
+      <div className="flex gap-2 w-full max-w-7xl h-[85vh]">
+        {/* 地图：64x64 */}
+        <div className="flex-1 border border-zinc-800 bg-black p-1 overflow-hidden relative flex items-center justify-center">
+          <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${MAP_SIZE}, 1fr)` }}>
             {mapGrid.map((row, y) => row.map((tile, x) => {
                const key = `${x},${y}`;
                const gnome = gnomes.find(g => g.x === x && g.y === y);
@@ -418,7 +436,7 @@ export default function GnomoriaGame() {
                const isExplored = exploredTiles.has(key);
                return (
                  <span key={key} onClick={() => handleTileClick(x, y)}
-                   className={`w-5 h-5 flex items-center justify-center cursor-pointer hover:bg-white/5 
+                   className={`w-3.5 h-3.5 flex items-center justify-center cursor-pointer hover:bg-white/10 text-[10px]
                    ${gnome ? (gnome.job==='SLEEPING'?'text-blue-400':'text-red-500 font-bold') : getTileColor(tile, isVisible, isExplored, gameTime.hour)}`}>
                    {!isExplored ? ' ' : (gnome ? (gnome.job==='SLEEPING'?'z':'@') : tile.content)}
                  </span>
@@ -427,14 +445,14 @@ export default function GnomoriaGame() {
           </div>
         </div>
 
-        {/* 右侧边栏：固定宽度 w-64 */}
-        <div className="flex flex-col gap-4 w-64 h-full">
-            <div className="bg-zinc-900 border border-zinc-800 p-3 flex-1 flex flex-col overflow-hidden">
-                 <h3 className="text-xs text-zinc-500 mb-3 uppercase tracking-widest border-b border-zinc-800 pb-2">&gt; Designations</h3>
+        {/* 右侧边栏：紧凑布局 */}
+        <div className="flex flex-col gap-2 w-56 h-full">
+            <div className="bg-zinc-900 border border-zinc-800 p-2 flex-1 flex flex-col overflow-hidden">
+                 <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Build</h3>
                  <div className="flex flex-col gap-1 overflow-y-auto flex-1">
                     {Object.keys(BUILD_MENU).map(k => (
                         <button key={k} onClick={() => setSelectedTool(k)}
-                            className={`text-left px-2 py-2 text-xs border transition-all flex justify-between
+                            className={`text-left px-2 py-1.5 text-[10px] border transition-all flex justify-between
                             ${selectedTool === k ? 'border-amber-500 text-amber-500 bg-amber-500/10' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
                             <span>{BUILD_MENU[k].label}</span>
                         </button>
@@ -442,24 +460,24 @@ export default function GnomoriaGame() {
                  </div>
             </div>
 
-            <div className="bg-zinc-900 border border-zinc-800 p-3 h-48 flex flex-col">
-                <h3 className="text-xs text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-2">&gt; Squad</h3>
-                <div className="flex-1 overflow-y-auto text-xs space-y-3">
+            <div className="bg-zinc-900 border border-zinc-800 p-2 h-40 flex flex-col">
+                <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Squad</h3>
+                <div className="flex-1 overflow-y-auto text-[10px] space-y-2">
                     {gnomes.map(g => (
                         <div key={g.id} className="flex justify-between items-center text-zinc-400">
-                            <span className={g.hunger>80?'text-red-500 animate-pulse':''}>{g.name}</span>
-                            <div className="flex flex-col w-24 gap-0.5">
-                                <div className="h-1 bg-zinc-800 rounded"><div className="h-1 bg-orange-500" style={{width:`${g.hunger}%`}}></div></div>
-                                <div className="h-1 bg-zinc-800 rounded"><div className="h-1 bg-blue-500" style={{width:`${g.energy}%`}}></div></div>
+                            <span className={g.hunger>80?'text-red-500':''}>{g.name}</span>
+                            <div className="flex flex-col w-16 gap-0.5">
+                                <div className="h-0.5 bg-zinc-800"><div className="h-0.5 bg-orange-500" style={{width:`${g.hunger}%`}}></div></div>
+                                <div className="h-0.5 bg-zinc-800"><div className="h-0.5 bg-blue-500" style={{width:`${g.energy}%`}}></div></div>
                             </div>
                         </div>
                     ))}
                 </div>
             </div>
 
-            <div className="bg-zinc-900 border border-zinc-800 p-3 h-40 flex flex-col">
-                <h3 className="text-xs text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-2">&gt; Log</h3>
-                <ul className="space-y-1 text-xs overflow-hidden">
+            <div className="bg-zinc-900 border border-zinc-800 p-2 h-32 flex flex-col">
+                <h3 className="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest border-b border-zinc-800 pb-1">&gt; Log</h3>
+                <ul className="space-y-0.5 text-[10px] overflow-hidden">
                     {logs.map((log, i) => (<li key={i} className={`truncate ${i === 0 ? 'text-amber-500' : 'text-zinc-600'}`}>{log}</li>))}
                 </ul>
             </div>
