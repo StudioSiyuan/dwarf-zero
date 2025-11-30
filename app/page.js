@@ -1,45 +1,52 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid'; // 引入 UUID
 
 // --- 游戏配置 ---
 const MAP_SIZE = 20;
-const TICK_RATE = 600; 
-const VIEW_RADIUS = 5; // 矮人的视野半径
+const TICK_RATE = 600;
+const VIEW_RADIUS = 5;
+const LOCAL_SAVE_KEY = "DWARF_ZERO_LOCAL_V1"; 
+const ID_KEY = "DWARF_ZERO_USER_ID"; // 存储用户的身份ID
+
+// --- 建筑耗材 ---
+const BUILD_COSTS = {
+  DIG:   { wood: 0, stone: 0, label: "挖掘 (Dig)" },
+  WALL:  { wood: 0, stone: 1, label: "建造墙壁 (Wall)" },
+  TABLE: { wood: 5, stone: 0, label: "木桌 (Table)" },
+  BED:   { wood: 8, stone: 0, label: "木床 (Bed)" },
+  DOOR:  { wood: 3, stone: 0, label: "木门 (Door)" }
+};
 
 // --- 样式辅助 ---
 const getTileColor = (type, isVisible, isExplored) => {
-  // 1. 如果完全没探索过 -> 隐藏 (黑色)
   if (!isExplored) return 'text-transparent';
-
-  // 2. 基础颜色
-  let color = 'text-game-text-dim';
+  let color = 'text-gray-500';
   switch (type) {
-    case 'WALL':  color = 'text-tile-wall'; break;
-    case 'TREE':  color = 'text-tile-tree'; break;
-    case 'WATER': color = 'text-tile-water'; break;
-    case 'EMPTY': color = 'text-tile-floor'; break;
+    case 'WALL':  color = 'text-gray-500'; break;
+    case 'TREE':  color = 'text-green-400'; break;
+    case 'WATER': color = 'text-blue-400'; break;
+    case 'EMPTY': color = 'text-gray-800'; break;
+    case 'TABLE': color = 'text-cyan-400'; break;
+    case 'BED':   color = 'text-indigo-400'; break;
+    case 'DOOR':  color = 'text-yellow-600'; break;
   }
-
-  // 3. 视觉处理：
-  // 如果当前可见 -> 保持原色 (高亮)
-  // 如果只是“记忆中” -> 降低透明度 (变暗)
-  if (isVisible) {
-    return color;
-  } else {
-    return `${color} opacity-20`; // 记忆区域变暗，非常有质感
-  }
+  return isVisible ? color : `${color} opacity-20`;
 };
 
 export default function DwarfGame() {
   const [mapGrid, setMapGrid] = useState([]);
-  const [dwarves, setDwarves] = useState([
-    { id: 1, name: "阿土", x: 10, y: 10, job: 'IDLE', target: null }
-  ]);
+  const [dwarves, setDwarves] = useState([]);
   const [resources, setResources] = useState({ wood: 0, stone: 0 });
-  const [logs, setLogs] = useState(["系统启动...", "战争迷雾系统已加载..."]);
-  
-  // 新增：探索过的区域 (存储格式 "x,y")
+  const [logs, setLogs] = useState([]);
   const [exploredTiles, setExploredTiles] = useState(new Set());
+  const [selectedTool, setSelectedTool] = useState('DIG');
+  const [isLoaded, setIsLoaded] = useState(false);
+  
+  // --- 云存档状态 ---
+  const [userId, setUserId] = useState(""); 
+  const [inputUserId, setInputUserId] = useState(""); // 输入框里的ID
+  const [syncStatus, setSyncStatus] = useState(""); // 显示同步状态信息
 
   const stateRef = useRef({ mapGrid, dwarves, resources, exploredTiles });
 
@@ -47,8 +54,48 @@ export default function DwarfGame() {
     stateRef.current = { mapGrid, dwarves, resources, exploredTiles };
   }, [mapGrid, dwarves, resources, exploredTiles]);
 
-  // --- 初始化地图 ---
+  // --- 本地自动保存 (依然保留，作为双重保险) ---
   useEffect(() => {
+    if (!isLoaded || mapGrid.length === 0) return;
+    const saveData = {
+      mapGrid, dwarves, resources, logs: logs.slice(0, 20), exploredTiles: Array.from(exploredTiles)
+    };
+    localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(saveData));
+  }, [mapGrid, dwarves, resources, exploredTiles, logs, isLoaded]);
+
+  // --- 初始化 ---
+  useEffect(() => {
+    // 1. 恢复或生成 User ID
+    let storedId = localStorage.getItem(ID_KEY);
+    if (!storedId) {
+      storedId = uuidv4().slice(0, 8).toUpperCase(); // 生成一个短 ID
+      localStorage.setItem(ID_KEY, storedId);
+    }
+    setUserId(storedId);
+    setInputUserId(storedId);
+
+    // 2. 尝试读取本地存档
+    const savedData = localStorage.getItem(LOCAL_SAVE_KEY);
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        loadGameData(parsed);
+        setLogs(prev => ["本地存档读取成功。", ...prev]);
+        return;
+      } catch (e) { console.error(e); }
+    }
+    generateNewWorld();
+  }, []);
+
+  const loadGameData = (data) => {
+    setMapGrid(data.mapGrid);
+    setDwarves(data.dwarves);
+    setResources(data.resources);
+    setExploredTiles(new Set(data.exploredTiles));
+    setIsLoaded(true);
+  };
+
+  const generateNewWorld = () => {
     const newMap = [];
     for (let y = 0; y < MAP_SIZE; y++) {
       const row = [];
@@ -60,32 +107,78 @@ export default function DwarfGame() {
       }
       newMap.push(row);
     }
-    // 出生点保护
     newMap[10][10] = { type: 'EMPTY', content: '·' };
-    
-    // 初始点亮出生点周围
     const initialExplored = new Set();
     for(let dy=-VIEW_RADIUS; dy<=VIEW_RADIUS; dy++){
         for(let dx=-VIEW_RADIUS; dx<=VIEW_RADIUS; dx++){
             initialExplored.add(`${10+dx},${10+dy}`);
         }
     }
-    
     setMapGrid(newMap);
+    setDwarves([{ id: 1, name: "阿土", x: 10, y: 10, job: 'IDLE', target: null }]);
+    setResources({ wood: 50, stone: 10 });
     setExploredTiles(initialExplored);
-    addLog("区域扫描完成。进入地下探索模式。");
-  }, []);
+    setLogs(["新世界已生成。"]);
+    setIsLoaded(true);
+  };
 
+  // --- ☁️ 云端同步逻辑 ---
+  const handleCloudUpload = async () => {
+    setSyncStatus("上传中...");
+    const saveData = {
+      mapGrid, dwarves, resources, logs: logs.slice(0, 20), exploredTiles: Array.from(exploredTiles)
+    };
+    
+    try {
+      const res = await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ saveId: userId, data: saveData }),
+      });
+      if (res.ok) {
+        setSyncStatus("✅ 上传成功! ID: " + userId);
+        addLog(`云存档已同步至服务器。ID: ${userId}`);
+      } else {
+        setSyncStatus("❌ 上传失败");
+      }
+    } catch (e) {
+      setSyncStatus("❌ 网络错误");
+    }
+    setTimeout(() => setSyncStatus(""), 3000);
+  };
+
+  const handleCloudDownload = async () => {
+    if (!inputUserId) return;
+    setSyncStatus("下载中...");
+    
+    try {
+      const res = await fetch(`/api/load?id=${inputUserId}`);
+      const json = await res.json();
+      
+      if (res.ok && json.data) {
+        loadGameData(json.data);
+        setUserId(inputUserId); // 更新当前 ID
+        localStorage.setItem(ID_KEY, inputUserId); // 记住新 ID
+        setSyncStatus("✅ 读取成功");
+        addLog(`已加载云存档 ID: ${inputUserId}`);
+      } else {
+        setSyncStatus("❌ 找不到存档");
+      }
+    } catch (e) {
+      setSyncStatus("❌ 网络错误");
+    }
+    setTimeout(() => setSyncStatus(""), 3000);
+  };
+
+  // --- 游戏循环 ---
   const addLog = (msg) => {
     setLogs(prev => [`[${new Date().toLocaleTimeString().slice(3,8)}] ${msg}`, ...prev].slice(0, 9));
   };
-
-  // --- BFS 寻路算法 ---
+  
   const findPathNextStep = (start, end, map) => {
     const queue = [{ x: start.x, y: start.y, path: [] }];
     const visited = new Set();
     visited.add(`${start.x},${start.y}`);
-
     const directions = [{ dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }];
 
     while (queue.length > 0) {
@@ -96,8 +189,8 @@ export default function DwarfGame() {
         const nx = x + dir.dx;
         const ny = y + dir.dy;
         if (nx < 0 || ny < 0 || nx >= MAP_SIZE || ny >= MAP_SIZE) continue;
-        
-        const isWalkable = map[ny][nx].type === 'EMPTY' || (nx === end.x && ny === end.y);
+        const tile = map[ny][nx];
+        const isWalkable = tile.type === 'EMPTY' || tile.type === 'DOOR' || (nx === end.x && ny === end.y);
         if (isWalkable && !visited.has(`${nx},${ny}`)) {
           visited.add(`${nx},${ny}`);
           const newPath = path.length === 0 ? [{x: nx, y: ny}] : path;
@@ -120,48 +213,30 @@ export default function DwarfGame() {
     return nearest;
   };
 
-  // --- 核心循环 ---
   useEffect(() => {
+    if (!isLoaded) return;
     const interval = setInterval(() => {
       const { mapGrid: currentMap, dwarves: currentDwarves, exploredTiles: currentExplored } = stateRef.current;
       if (currentMap.length === 0) return;
 
       const nextMap = currentMap.map(row => [...row]);
       const nextDwarves = currentDwarves.map(d => ({ ...d }));
-      // 复制 Set，用于更新探索区域
       const nextExplored = new Set(currentExplored);
       let mapChanged = false;
 
       nextDwarves.forEach(dwarf => {
-        // --- 1. 更新迷雾 (Fog of War) ---
-        // 矮人走到哪里，哪里的迷雾就散开
         for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) {
             for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
-                const tx = dwarf.x + dx;
-                const ty = dwarf.y + dy;
-                // 简单的圆形视野检查
-                if (tx >= 0 && ty >= 0 && tx < MAP_SIZE && ty < MAP_SIZE) {
-                    if (Math.abs(dx) + Math.abs(dy) <= VIEW_RADIUS) {
-                        nextExplored.add(`${tx},${ty}`);
-                    }
+                if (Math.abs(dx) + Math.abs(dy) <= VIEW_RADIUS) {
+                    const tx = dwarf.x + dx, ty = dwarf.y + dy;
+                    if (tx >= 0 && ty >= 0 && tx < MAP_SIZE && ty < MAP_SIZE) nextExplored.add(`${tx},${ty}`);
                 }
             }
         }
-
-        // --- 2. AI 逻辑 ---
         if (!dwarf.target) {
           const tree = findNearestBlock(nextMap, dwarf.x, dwarf.y, 'TREE');
-          if (tree) {
-            dwarf.target = tree;
-            dwarf.job = 'MOVING';
-            if (currentDwarves.find(d=>d.id===dwarf.id).job === 'IDLE') {
-              addLog(`${dwarf.name} 探索到了树木，正在前往。`);
-            }
-          } else {
-             dwarf.job = 'IDLE'; 
-          }
+          if (tree) { dwarf.target = tree; dwarf.job = 'MOVING'; }
         }
-
         if (dwarf.target) {
           const dist = Math.abs(dwarf.target.x - dwarf.x) + Math.abs(dwarf.target.y - dwarf.y);
           if (dist <= 1) {
@@ -170,105 +245,103 @@ export default function DwarfGame() {
               nextMap[dwarf.target.y][dwarf.target.x] = { type: 'EMPTY', content: '·' };
               mapChanged = true;
               setResources(prev => ({ ...prev, wood: prev.wood + 10 }));
-              addLog(`${dwarf.name} 砍倒了树 (木材+10)`);
-              dwarf.target = null;
-              dwarf.job = 'IDLE';
-            } else {
-              dwarf.target = null;
-            }
+              addLog(`${dwarf.name} 采集了木材 (+10)`);
+              dwarf.target = null; dwarf.job = 'IDLE';
+            } else { dwarf.target = null; }
           } else {
             const nextStep = findPathNextStep({x: dwarf.x, y: dwarf.y}, dwarf.target, nextMap);
-            if (nextStep) {
-              dwarf.x = nextStep.x;
-              dwarf.y = nextStep.y;
-            } else {
-              dwarf.target = null;
-              dwarf.job = 'IDLE';
-            }
+            if (nextStep) { dwarf.x = nextStep.x; dwarf.y = nextStep.y; }
+            else { dwarf.target = null; }
           }
         }
       });
-
-      setDwarves(nextDwarves);
-      setExploredTiles(nextExplored); // 更新探索区域
+      setDwarves(nextDwarves); setExploredTiles(nextExplored);
       if (mapChanged) setMapGrid(nextMap);
-
     }, TICK_RATE);
-
     return () => clearInterval(interval);
-  }, []);
+  }, [isLoaded]);
 
   const handleTileClick = (x, y) => {
-    // 只有探索过的地方才能交互！
     if (!stateRef.current.exploredTiles.has(`${x},${y}`)) return;
-
     const newMap = [...mapGrid];
     const tile = newMap[y][x];
-    if (tile.type === 'WALL') {
-      newMap[y][x] = { type: 'EMPTY', content: '·' };
-      setResources(prev => ({ ...prev, stone: prev.stone + 1 }));
-    } else if (tile.type === 'EMPTY') {
-      newMap[y][x] = { type: 'WALL', content: '#' };
+    const cost = BUILD_COSTS[selectedTool];
+    
+    if (resources.wood < cost.wood || resources.stone < cost.stone) {
+        addLog(`材料不足！需要: 木${cost.wood} 石${cost.stone}`); return;
     }
-    setMapGrid(newMap);
-  };
 
-  // --- 渲染辅助：判断当前视野 ---
-  // 每一帧都要重新计算哪些格子是“当前可见”的
-  const getVisibleSet = () => {
-    const visible = new Set();
-    dwarves.forEach(d => {
-        for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) {
-            for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
-                if (Math.abs(dx) + Math.abs(dy) <= VIEW_RADIUS) {
-                    visible.add(`${d.x + dx},${d.y + dy}`);
-                }
-            }
+    let actionSuccess = false;
+    if (selectedTool === 'DIG') {
+        if (tile.type === 'WALL') {
+            newMap[y][x] = { type: 'EMPTY', content: '·' };
+            setResources(prev => ({ ...prev, stone: prev.stone + 1 }));
+            addLog(`挖掘成功 (石料+1)`); actionSuccess = true;
         }
-    });
-    return visible;
+    } else {
+        if (tile.type === 'EMPTY') {
+            let newContent = selectedTool === 'WALL' ? '#' : selectedTool === 'TABLE' ? 'Π' : selectedTool === 'BED' ? '=' : selectedTool === 'DOOR' ? '+' : '?';
+            newMap[y][x] = { type: selectedTool, content: newContent };
+            setResources(prev => ({ wood: prev.wood - cost.wood, stone: prev.stone - cost.stone }));
+            addLog(`建造了 ${cost.label}`); actionSuccess = true;
+        }
+    }
+    if (actionSuccess) setMapGrid(newMap);
   };
 
-  const visibleSet = getVisibleSet(); // 渲染时实时计算
+  const visibleSet = new Set();
+  dwarves.forEach(d => {
+      for (let dy = -VIEW_RADIUS; dy <= VIEW_RADIUS; dy++) {
+          for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
+              if (Math.abs(dx) + Math.abs(dy) <= VIEW_RADIUS) visibleSet.add(`${d.x + dx},${d.y + dy}`);
+          }
+      }
+  });
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-game-bg text-game-text-main p-4">
-      <div className="w-full max-w-3xl bg-game-panel border border-game-border p-4 mb-4 flex justify-between items-center shadow-lg rounded-sm">
-        <div>
-           <h1 className="text-xl font-bold text-game-text-highlight tracking-widest">DWARF_ZERO // WEB</h1>
-           <div className="text-xs text-game-text-dim mt-1">MODULE: FOG_OF_WAR</div>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-game-bg text-game-text-main p-4 font-mono select-none">
+      
+      {/* 顶部面板 */}
+      <div className="w-full max-w-4xl bg-game-panel border border-game-border p-4 mb-4 flex justify-between items-center shadow-lg rounded-sm">
+        <div className="flex flex-col">
+           <h1 className="text-xl font-bold text-white tracking-widest">DWARF_ZERO // CLOUD</h1>
+           <div className="flex gap-4 mt-2 items-center text-xs">
+             <span className="text-gray-500">ID:</span>
+             <input 
+               type="text" 
+               value={inputUserId} 
+               onChange={(e) => setInputUserId(e.target.value)} 
+               className="bg-black border border-gray-700 text-green-500 px-2 py-0.5 w-24 text-center focus:outline-none focus:border-green-500"
+             />
+             <button onClick={handleCloudUpload} className="text-gray-300 hover:text-white border border-gray-600 px-2 py-0.5 hover:bg-gray-800">[⬆ UPLOAD]</button>
+             <button onClick={handleCloudDownload} className="text-gray-300 hover:text-white border border-gray-600 px-2 py-0.5 hover:bg-gray-800">[⬇ LOAD]</button>
+             <span className="text-yellow-500">{syncStatus}</span>
+           </div>
         </div>
-        <div className="flex gap-6 font-mono text-sm">
-          <div className="text-tile-tree font-bold">WOOD: {resources.wood}</div>
-          <div className="text-tile-wall font-bold">STONE: {resources.stone}</div>
+        <div className="flex gap-6 text-sm">
+          <div className="text-green-400 font-bold">WOOD: {resources.wood}</div>
+          <div className="text-gray-400 font-bold">STONE: {resources.stone}</div>
         </div>
       </div>
 
-      <div className="flex gap-4 w-full max-w-3xl h-[500px]">
-        {/* 左侧：地图区域 */}
-        <div className="border border-game-border bg-black p-4 overflow-hidden relative shadow-inner flex items-center justify-center">
+      <div className="flex gap-4 w-full max-w-4xl h-[500px]">
+        {/* 地图 */}
+        <div className="border border-game-border bg-black p-4 overflow-hidden relative flex items-center justify-center">
           <div>
             {mapGrid.map((row, y) => (
               <div key={y} className="flex leading-none">
                 {row.map((tile, x) => {
                   const key = `${x},${y}`;
                   const dwarf = dwarves.find(d => d.x === x && d.y === y);
-                  
-                  // 状态判断
                   const isVisible = visibleSet.has(key);
                   const isExplored = exploredTiles.has(key);
-                  
-                  // 如果完全没探索过，就不显示鼠标手势
-                  const cursorClass = isExplored ? 'cursor-pointer hover:bg-white/10' : 'cursor-default';
-
                   return (
                     <span 
                       key={key} 
                       onClick={() => handleTileClick(x, y)}
-                      className={`w-6 h-6 flex items-center justify-center font-mono transition-colors duration-500 ${cursorClass}
-                      ${dwarf ? 'text-tile-dwarf font-bold animate-pulse' : getTileColor(tile.type, isVisible, isExplored)}`}
+                      className={`w-6 h-6 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-colors duration-300
+                      ${dwarf ? 'text-yellow-400 font-bold animate-pulse' : getTileColor(tile.type, isVisible, isExplored)}`}
                     >
-                      {/* 如果完全没探索过，显示空或者迷雾字符；如果有矮人，优先显示矮人 */}
                       {!isExplored ? ' ' : (dwarf ? '@' : tile.content)}
                     </span>
                   );
@@ -278,18 +351,29 @@ export default function DwarfGame() {
           </div>
         </div>
 
-        {/* 右侧：日志 */}
-        <div className="flex-1 bg-game-panel border border-game-border p-4 flex flex-col rounded-sm">
-          <h3 className="text-xs text-game-text-dim mb-3 uppercase border-b border-game-border pb-2 tracking-widest">&gt; System Log</h3>
-          <div className="flex-1 overflow-hidden relative">
-            <ul className="space-y-2 font-mono text-xs absolute bottom-0 w-full">
-              {logs.map((log, i) => (
-                <li key={i} className={`truncate ${i === 0 ? 'text-game-text-highlight' : 'text-game-text-dim'}`}>
-                  {log}
-                </li>
-              ))}
-            </ul>
-          </div>
+        {/* 右侧 */}
+        <div className="flex-1 flex flex-col gap-4">
+            <div className="bg-game-panel border border-game-border p-3 flex-1 flex flex-col">
+                 <h3 className="text-xs text-gray-500 mb-3 uppercase tracking-widest border-b border-gray-800 pb-2">> Build Menu</h3>
+                 <div className="grid grid-cols-1 gap-2 overflow-y-auto">
+                    {Object.keys(BUILD_COSTS).map(toolKey => (
+                        <button key={toolKey} onClick={() => setSelectedTool(toolKey)}
+                            className={`text-left px-3 py-2 text-xs border transition-all flex justify-between group
+                            ${selectedTool === toolKey ? 'border-white text-white bg-white/5' : 'border-gray-800 text-gray-500 hover:border-gray-600 hover:text-gray-300'}`}>
+                            <span>{BUILD_COSTS[toolKey].label}</span>
+                            <span className="text-gray-600 group-hover:text-gray-400">{BUILD_COSTS[toolKey].wood > 0 && `W:${BUILD_COSTS[toolKey].wood} `}{BUILD_COSTS[toolKey].stone > 0 && `S:${BUILD_COSTS[toolKey].stone}`}</span>
+                        </button>
+                    ))}
+                 </div>
+            </div>
+            <div className="bg-game-panel border border-game-border p-3 h-48 flex flex-col">
+                <h3 className="text-xs text-gray-500 mb-2 uppercase tracking-widest border-b border-gray-800 pb-2">> Log</h3>
+                <div className="flex-1 overflow-hidden relative">
+                    <ul className="space-y-1 text-xs absolute bottom-0 w-full">
+                    {logs.map((log, i) => (<li key={i} className={`truncate ${i === 0 ? 'text-white' : 'text-gray-600'}`}>{log}</li>))}
+                    </ul>
+                </div>
+            </div>
         </div>
       </div>
     </div>
