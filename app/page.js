@@ -1,13 +1,13 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
-import { v4 as uuidv4 } from 'uuid'; // 引入 UUID
+import { v4 as uuidv4 } from 'uuid'; 
 
 // --- 游戏配置 ---
 const MAP_SIZE = 20;
 const TICK_RATE = 600;
 const VIEW_RADIUS = 5;
 const LOCAL_SAVE_KEY = "DWARF_ZERO_LOCAL_V1"; 
-const ID_KEY = "DWARF_ZERO_USER_ID"; // 存储用户的身份ID
+const ID_KEY = "DWARF_ZERO_USER_ID"; 
 
 // --- 建筑耗材 ---
 const BUILD_COSTS = {
@@ -45,8 +45,8 @@ export default function DwarfGame() {
   
   // --- 云存档状态 ---
   const [userId, setUserId] = useState(""); 
-  const [inputUserId, setInputUserId] = useState(""); // 输入框里的ID
-  const [syncStatus, setSyncStatus] = useState(""); // 显示同步状态信息
+  const [inputUserId, setInputUserId] = useState(""); 
+  const [syncStatus, setSyncStatus] = useState(""); 
 
   const stateRef = useRef({ mapGrid, dwarves, resources, exploredTiles });
 
@@ -54,7 +54,7 @@ export default function DwarfGame() {
     stateRef.current = { mapGrid, dwarves, resources, exploredTiles };
   }, [mapGrid, dwarves, resources, exploredTiles]);
 
-  // --- 本地自动保存 (依然保留，作为双重保险) ---
+  // --- 本地自动保存 ---
   useEffect(() => {
     if (!isLoaded || mapGrid.length === 0) return;
     const saveData = {
@@ -65,16 +65,14 @@ export default function DwarfGame() {
 
   // --- 初始化 ---
   useEffect(() => {
-    // 1. 恢复或生成 User ID
     let storedId = localStorage.getItem(ID_KEY);
     if (!storedId) {
-      storedId = uuidv4().slice(0, 8).toUpperCase(); // 生成一个短 ID
+      storedId = uuidv4().slice(0, 8).toUpperCase(); 
       localStorage.setItem(ID_KEY, storedId);
     }
     setUserId(storedId);
     setInputUserId(storedId);
 
-    // 2. 尝试读取本地存档
     const savedData = localStorage.getItem(LOCAL_SAVE_KEY);
     if (savedData) {
       try {
@@ -157,8 +155,8 @@ export default function DwarfGame() {
       
       if (res.ok && json.data) {
         loadGameData(json.data);
-        setUserId(inputUserId); // 更新当前 ID
-        localStorage.setItem(ID_KEY, inputUserId); // 记住新 ID
+        setUserId(inputUserId); 
+        localStorage.setItem(ID_KEY, inputUserId); 
         setSyncStatus("✅ 读取成功");
         addLog(`已加载云存档 ID: ${inputUserId}`);
       } else {
@@ -298,6 +296,14 @@ export default function DwarfGame() {
       }
   });
 
+  // --- 重置处理 ---
+  const handleReset = () => {
+    if (confirm("确定要重置世界吗？")) {
+        localStorage.removeItem(LOCAL_SAVE_KEY);
+        window.location.reload();
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-game-bg text-game-text-main p-4 font-mono select-none">
       
@@ -316,6 +322,7 @@ export default function DwarfGame() {
              <button onClick={handleCloudUpload} className="text-gray-300 hover:text-white border border-gray-600 px-2 py-0.5 hover:bg-gray-800">[⬆ UPLOAD]</button>
              <button onClick={handleCloudDownload} className="text-gray-300 hover:text-white border border-gray-600 px-2 py-0.5 hover:bg-gray-800">[⬇ LOAD]</button>
              <span className="text-yellow-500">{syncStatus}</span>
+             <button onClick={handleReset} className="ml-4 text-red-500 hover:underline">[RESET]</button>
            </div>
         </div>
         <div className="flex gap-6 text-sm">
@@ -354,7 +361,7 @@ export default function DwarfGame() {
         {/* 右侧 */}
         <div className="flex-1 flex flex-col gap-4">
             <div className="bg-game-panel border border-game-border p-3 flex-1 flex flex-col">
-                 <h3 className="text-xs text-gray-500 mb-3 uppercase tracking-widest border-b border-gray-800 pb-2">> Build Menu</h3>
+                 <h3 className="text-xs text-gray-500 mb-3 uppercase tracking-widest border-b border-gray-800 pb-2">&gt; Build Menu</h3>
                  <div className="grid grid-cols-1 gap-2 overflow-y-auto">
                     {Object.keys(BUILD_COSTS).map(toolKey => (
                         <button key={toolKey} onClick={() => setSelectedTool(toolKey)}
@@ -367,7 +374,7 @@ export default function DwarfGame() {
                  </div>
             </div>
             <div className="bg-game-panel border border-game-border p-3 h-48 flex flex-col">
-                <h3 className="text-xs text-gray-500 mb-2 uppercase tracking-widest border-b border-gray-800 pb-2">> Log</h3>
+                <h3 className="text-xs text-gray-500 mb-2 uppercase tracking-widest border-b border-gray-800 pb-2">&gt; Log</h3>
                 <div className="flex-1 overflow-hidden relative">
                     <ul className="space-y-1 text-xs absolute bottom-0 w-full">
                     {logs.map((log, i) => (<li key={i} className={`truncate ${i === 0 ? 'text-white' : 'text-gray-600'}`}>{log}</li>))}
