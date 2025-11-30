@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 引入 JetBrains Mono 字体 */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
 :root {
@@ -10,10 +9,15 @@
 }
 
 body {
-  @apply bg-game-bg text-game-text-main font-mono;
-  /* 禁止选中文字，防止点击地图时变成蓝色选中状态 */
+  /* 关键修改：
+     之前这里用的是 @apply bg-game-bg ...
+     我们现在改用标准的 CSS 语法，这样编译时绝对不会报错。
+  */
+  background-color: #0a0a0a; 
+  color: #e5e5e5;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  
   user-select: none;
   -webkit-user-select: none;
-  /* 隐藏滚动条 */
   overflow: hidden; 
 }
