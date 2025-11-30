@@ -310,7 +310,7 @@ export default function DwarfGame() {
       {/* 顶部面板 */}
       <div className="w-full max-w-4xl bg-game-panel border border-game-border p-4 mb-4 flex justify-between items-center shadow-lg rounded-sm">
         <div className="flex flex-col">
-           <h1 className="text-xl font-bold text-white tracking-widest">DWARF_ZERO // CLOUD</h1>
+           <h1 className="text-xl font-bold text-white tracking-widest">DWARF_ZERO // CLOUD V0.9</h1>
            <div className="flex gap-4 mt-2 items-center text-xs">
              <span className="text-gray-500">ID:</span>
              <input 
